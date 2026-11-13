@@ -1,7 +1,13 @@
 # K-Drama Universe: "What should I watch tonight?"
 # Run with:  python -m streamlit run app.py
+import html
+import itertools
+import json
 import re
+import urllib.error
+import urllib.request
 from decimal import Decimal
+from urllib.parse import quote_plus, urlencode
 
 import altair as alt
 import pandas as pd
@@ -25,6 +31,7 @@ DB_NAME = setting("DB_NAME", "kdrama")
 DB_USER = setting("DB_USER", "postgres")
 DB_PASSWORD = setting("DB_PASSWORD", "YOUR_PASSWORD")
 DB_SSLMODE = setting("DB_SSLMODE", "prefer")      # online databases need "require"
+YOUTUBE_API_KEY = setting("YOUTUBE_API_KEY", "")   # optional: lets the app play trailers inside the page
 
 st.set_page_config(page_title="K-Drama Universe", page_icon="🎬", layout="wide")
 
@@ -86,6 +93,78 @@ def has(value):
     return str(value).strip() != ""
 
 
+_button_counter = itertools.count()      # gives every Trailer button its own key
+
+
+def youtube_search_url(title, year=None):
+    year_text = f" {int(year)}" if has(year) else ""
+    return ("https://www.youtube.com/results?search_query="
+            + quote_plus(f"{title}{year_text} korean drama official trailer"))
+
+
+@st.cache_data(ttl=30 * 24 * 3600, max_entries=1000, show_spinner=False)
+def find_trailer(title, year):
+    """Ask YouTube for the top result for '<title> <year> korean drama official trailer'.
+    Returns (video id, video title). A failed search raises an error, so it is never cached.
+    A search costs 100 of the 10,000 free units per day, so every answer is remembered for 30 days."""
+    year_text = f" {year}" if year else ""
+    params = {"part": "snippet", "type": "video", "videoEmbeddable": "true", "maxResults": 1,
+              "q": f"{title}{year_text} korean drama official trailer", "key": YOUTUBE_API_KEY}
+    try:
+        with urllib.request.urlopen("https://www.googleapis.com/youtube/v3/search?" + urlencode(params),
+                                    timeout=10) as resp:
+            data = json.load(resp)
+    except urllib.error.HTTPError as e:
+        try:
+            err = json.load(e)["error"]
+            reason = f'{err["errors"][0]["reason"]}: {err.get("message", "")}'[:220]   # what YouTube says
+        except Exception:
+            reason = f"HTTP {e.code}"
+        raise RuntimeError(reason)
+    items = data.get("items", [])
+    if not items:
+        raise LookupError("YouTube found no video")
+    return items[0]["id"]["videoId"], html.unescape(items[0]["snippet"]["title"])
+
+
+def set_trailer(title, year, where):
+    st.session_state["trailer"] = {"title": title, "year": year, "where": where}
+
+
+def clear_trailer():
+    st.session_state.pop("trailer", None)
+
+
+def trailer_button(title, year=None, where=""):
+    """Small button under a drama. It only remembers the choice; the player is drawn at the top of the page."""
+    st.button("▶ Trailer", key=f"trailer_{where}_{next(_button_counter)}",
+              on_click=set_trailer, args=(title, year, where))
+
+
+def trailer_player(where):
+    """Plays the chosen trailer inside the page (call it near the top of a screen)."""
+    t = st.session_state.get("trailer")
+    if not t or t["where"] != where:
+        return
+    title, year = t["title"], t["year"]
+    year_text = f" ({int(year)})" if has(year) else ""
+    with st.container(border=True):
+        head, close = st.columns([6, 1])
+        head.subheader(f"Trailer: {title}{year_text}")
+        close.button("Close", key=f"trailer_close_{where}", on_click=clear_trailer)
+        if not YOUTUBE_API_KEY:
+            st.info("To play trailers inside the app, add YOUTUBE_API_KEY to the secrets. "
+                    "Until then, use the YouTube link below.")
+        else:
+            try:
+                video_id, video_title = find_trailer(title, int(year) if has(year) else None)
+                st.video(f"https://www.youtube.com/watch?v={video_id}")
+                st.caption(f"Top YouTube result: {video_title}")
+            except Exception as e:
+                st.warning(f"Could not load the trailer ({e}).")
+        st.markdown(f"[Not the right video? Search YouTube yourself]({youtube_search_url(title, year)})")
+
+
 def show_posters(df, per_row=5):
     """Show dramas as a wall of posters, one card per drama."""
     for start in range(0, len(df), per_row):
@@ -100,6 +179,7 @@ def show_posters(df, per_row=5):
                 st.markdown(f"**{row['title']}**{year}")
                 st.caption(f"Rating {row['rating']} | {int(row['votes']):,} votes")
                 st.caption(row["lead_actors"] if has(row["lead_actors"]) else "Leads: unknown")
+                trailer_button(row["title"], row["start_year"], "disc")
 
 
 # ---------------------------------------------------------------------------
@@ -126,6 +206,7 @@ LIMIT %s
 
 def discover_page():
     st.header("Discover")
+    trailer_player("disc")
     genres = run_query("SELECT name FROM genre ORDER BY name")["name"].tolist()
 
     left, mid, right = st.columns([2, 2, 2])
@@ -431,10 +512,12 @@ def show_similar(df, per_row=5):
                 if has(row["shared_genres"]):
                     reasons.append(f"{int(row['shared_genres'])} shared genre(s)")
                 st.caption(" | ".join(reasons))
+                trailer_button(row["title"], row["start_year"], "sim")
 
 
 def find_similar_page():
     st.header("Find similar")
+    trailer_player("sim")
     st.caption("Pick a drama you liked. We suggest dramas with the same writer, "
                "the same lead actor or the same genres, and tell you why.")
     dramas = run_query("SELECT drama_id, title, start_year FROM drama ORDER BY title, start_year")
@@ -475,6 +558,7 @@ BADGES = {"Romance": "The Hopeless Romantic", "Thriller": "The Thrill-Seeker", "
 
 def taste_card_page():
     st.header("Your K-drama Taste Card")
+    trailer_player("taste")
     st.caption("Pick three dramas you love. We turn them into your K-drama DNA.")
     dramas = run_query("SELECT drama_id, title, start_year FROM drama ORDER BY title, start_year")
     labels = []
@@ -520,6 +604,7 @@ def taste_card_page():
                 if has(r["poster_url"]):
                     st.image(r["poster_url"], width="stretch")
                 st.markdown(f"**{r['title']}**")
+                trailer_button(r["title"], None, "taste")
         m1, m2, m3 = st.columns(3)
         m1.metric("Average rating", avg)
         m2.metric("Favourite writer", writer["name"][0] if not writer.empty else "unknown")
@@ -765,6 +850,7 @@ def my_list_page():
             if recs.empty:
                 st.info("No suggestion with this filter. Try a lower rating.")
             else:
+                trailer_player("rec")
                 for start in range(0, len(recs), 5):
                     cols = st.columns(5)
                     for col, (_, r) in zip(cols, recs.iloc[start:start + 5].iterrows()):
@@ -782,6 +868,7 @@ def my_list_page():
                             if int(r["shared_genres"]):
                                 why.append(f"{int(r['shared_genres'])} genre(s) you like")
                             st.caption(" | ".join(why))
+                            trailer_button(r["title"], r["start_year"], "rec")
 
 # ---------------------------------------------------------------------------
 # Screen: Ask the data (no AI, no key, free)
