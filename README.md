@@ -1,6 +1,7 @@
 # K-Drama Universe
 
-**"What should I watch tonight?"** A Streamlit app on a PostgreSQL database of 3,550 Korean dramas (IMDb data from Kaggle). Databases course project, ITU Lahore.
+**"What should I watch tonight?"**
+A Streamlit app on a PostgreSQL database of 3,550 Korean dramas (IMDb data from Kaggle). Databases course project, ITU Lahore.
 
 **Live app:** https://kdrama-universe-fxzknzesb4yucwekqiot2p.streamlit.app
 (It may be asleep: open it and wait a few seconds.)
