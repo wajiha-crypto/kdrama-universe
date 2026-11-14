@@ -1,5 +1,7 @@
 -- PART D: ANSWERING OUR QUESTIONS (Korean Drama Universe, database: kdrama)
 -- Run each query on its own: click inside it and press Ctrl + Enter.
+-- Part D in the PDF: Q1-Q5 (our proposal questions) and Q6-Q10 (questions behind the product screens).
+-- Q11-Q17 are extra queries used only by the Streamlit app (not part of the PDF).
 
 -- Q1: Which lead actor has the most hit dramas with the same writer?
 SELECT a.name AS actor,                       -- lead actor
@@ -157,6 +159,8 @@ GROUP BY a.name
 ORDER BY dramas DESC, avg_rating DESC NULLS LAST, a.name
 LIMIT 15;
 
+-- ============ EXTRA queries used by the Streamlit app (not in the PDF) ============
+
 -- Q11: Taste Card: genre mix of three favourite dramas
 SELECT g.name AS genre, COUNT(*) AS how_many              -- how many of the 3 picks have this genre
 FROM drama d
@@ -209,4 +213,63 @@ LIMIT 10;
 SELECT title, start_year, rating, votes FROM drama
 WHERE votes >= 50000 AND rating < 7.0
 ORDER BY votes DESC
+LIMIT 10;
+
+-- Q16: My list: the dramas on one user's watchlist (join of 3 tables)
+-- (first sign in once on the My list screen with the username 'demo' and add a drama)
+SELECT u.username, d.title, d.start_year, d.rating, w.added_on
+FROM watchlist w
+JOIN app_user u ON u.user_id  = w.user_id               -- join 1: watchlist -> user
+JOIN drama d    ON d.drama_id = w.drama_id              -- join 2: watchlist -> drama details
+WHERE u.username = 'demo'                               -- change the username
+ORDER BY w.added_on DESC, d.title;
+
+-- Q17: My list: recommendations. Score = 3 per shared writer + 2 per shared lead + 1 per shared genre
+-- with the dramas this user rated 7 or more (first rate a drama 7+ on the My list screen as 'demo').
+WITH me AS (SELECT user_id FROM app_user WHERE username = 'demo'),      -- change the username
+liked AS (                                                 -- dramas this user rated 7 or more
+    SELECT ur.drama_id FROM user_rating ur JOIN me ON me.user_id = ur.user_id WHERE ur.my_rating >= 7
+),
+seen AS (                                                  -- dramas already watched or on the watchlist
+    SELECT ur.drama_id FROM user_rating ur JOIN me ON me.user_id = ur.user_id
+    UNION
+    SELECT w.drama_id FROM watchlist w JOIN me ON me.user_id = w.user_id
+),
+w_score AS (                                               -- writers shared with liked dramas
+    SELECT w2.drama_id, COUNT(DISTINCT w1.writer_id) AS n
+    FROM liked l
+    JOIN drama_writer w1 ON w1.drama_id  = l.drama_id
+    JOIN drama_writer w2 ON w2.writer_id = w1.writer_id
+    GROUP BY w2.drama_id
+),
+l_score AS (                                               -- lead actors shared with liked dramas
+    SELECT l2.drama_id, COUNT(DISTINCT l1.actor_id) AS n
+    FROM liked l
+    JOIN drama_lead l1 ON l1.drama_id = l.drama_id
+    JOIN drama_lead l2 ON l2.actor_id = l1.actor_id
+    GROUP BY l2.drama_id
+),
+g_score AS (                                               -- genres shared with liked dramas
+    SELECT g2.drama_id, COUNT(DISTINCT g1.genre_id) AS n
+    FROM liked l
+    JOIN drama_genre g1 ON g1.drama_id = l.drama_id
+    JOIN drama_genre g2 ON g2.genre_id = g1.genre_id
+    GROUP BY g2.drama_id
+)
+SELECT * FROM (
+    SELECT d.title, d.start_year, d.rating, d.votes,
+           COALESCE(w.n, 0) AS shared_writers,
+           COALESCE(l.n, 0) AS shared_leads,
+           COALESCE(g.n, 0) AS shared_genres,
+           3 * COALESCE(w.n, 0) + 2 * COALESCE(l.n, 0) + COALESCE(g.n, 0) AS score
+    FROM drama d
+    LEFT JOIN w_score w ON w.drama_id = d.drama_id
+    LEFT JOIN l_score l ON l.drama_id = d.drama_id
+    LEFT JOIN g_score g ON g.drama_id = d.drama_id
+    WHERE d.drama_id NOT IN (SELECT drama_id FROM seen)    -- never suggest what the user already knows
+      AND d.rating >= 7.0
+      AND d.votes  >= 1000
+) t
+WHERE score > 0
+ORDER BY score DESC, rating DESC, votes DESC
 LIMIT 10;

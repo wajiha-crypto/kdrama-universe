@@ -12,6 +12,7 @@ CREATE TABLE drama (
     synopsis        TEXT,
     age_rating      TEXT,
     runtime_minutes INT,
+    poster_url      TEXT,                                        -- poster image link (filled in C14)
     CONSTRAINT chk_rating  CHECK (rating BETWEEN 0 AND 10),      -- IMDb scale is 0 to 10
     CONSTRAINT chk_votes   CHECK (votes >= 0),                   -- votes cannot be negative
     CONSTRAINT chk_years   CHECK (end_year >= start_year),       -- a drama cannot end before it starts
@@ -47,6 +48,7 @@ CREATE TABLE drama_genre (
     genre_id INT  REFERENCES genre(genre_id),
     PRIMARY KEY (drama_id, genre_id)
 );
+-- tables for the Streamlit app (My list screen)
 -- app users: only a username, no personal data
 CREATE TABLE app_user (
     user_id  INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -75,21 +77,7 @@ CREATE INDEX idx_drama_director_d ON drama_director (director_id);
 CREATE INDEX idx_drama_lead_a     ON drama_lead (actor_id);
 CREATE INDEX idx_drama_genre_g    ON drama_genre (genre_id);
 
--- B-COUNT: number of rows in each table (run this one, it is safe)
-SELECT 'drama' AS tbl, COUNT(*) AS total_rows FROM drama
-UNION ALL SELECT 'writer',         COUNT(*) FROM writer
-UNION ALL SELECT 'director',       COUNT(*) FROM director
-UNION ALL SELECT 'actor',          COUNT(*) FROM actor
-UNION ALL SELECT 'genre',          COUNT(*) FROM genre
-UNION ALL SELECT 'drama_writer',   COUNT(*) FROM drama_writer
-UNION ALL SELECT 'drama_director', COUNT(*) FROM drama_director
-UNION ALL SELECT 'drama_lead',     COUNT(*) FROM drama_lead
-UNION ALL SELECT 'drama_genre',    COUNT(*) FROM drama_genre;
-
-SELECT table_name FROM information_schema.tables
-WHERE table_name IN ('app_user', 'watchlist', 'user_rating');
-
--- rows in each table plus the grand total (kdramas_raw and the app tables are left out on purpose)
+-- B-COUNT: rows in each table plus the grand total (kdramas_raw and the app tables are left out on purpose)
 SELECT tbl, total_rows FROM (
     SELECT 1 AS ord, 'drama'          AS tbl, COUNT(*) AS total_rows FROM drama
     UNION ALL SELECT 2,  'writer',         COUNT(*) FROM writer

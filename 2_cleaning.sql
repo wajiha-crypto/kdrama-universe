@@ -1,11 +1,11 @@
 -- PART C: ENGAGING WITH THE DATA (checks and cleaning)
 -- The raw CSV was imported as-is into kdramas_raw (all columns TEXT).
 
--- CREATE TABLE kdramas_raw (
---     title TEXT, rating TEXT, genres TEXT, votes TEXT, synopsis TEXT, age_rating TEXT,
---     mainlead1 TEXT, mainlead2 TEXT, startyear TEXT, endyear TEXT, writer TEXT,
---     director TEXT, id TEXT, runtimeminutes TEXT, image_url TEXT
--- );
+CREATE TABLE kdramas_raw (
+    title TEXT, rating TEXT, genres TEXT, votes TEXT, synopsis TEXT, age_rating TEXT,
+    mainlead1 TEXT, mainlead2 TEXT, startyear TEXT, endyear TEXT, writer TEXT,
+    director TEXT, id TEXT, runtimeminutes TEXT, image_url TEXT
+);
 
 -- C1: are there duplicate dramas in the raw data?
 SELECT id, COUNT(*) AS copies          -- same IMDb id appearing more than once
@@ -67,10 +67,10 @@ GROUP BY tbl, norm_name
 HAVING COUNT(*) > 1          -- more than one spelling maps to the same normalized name
 ORDER BY tbl, norm_name;
 
--- C7: synopsis stored the missing values as the text '\N'; check what is stored
-SELECT synopsis, COUNT(*) AS n FROM drama GROUP BY synopsis ORDER BY n DESC LIMIT 5;
+-- C7: synopsis stored the missing values as the text '\N'; check what is stored in the raw data
+SELECT synopsis, COUNT(*) AS n FROM kdramas_raw GROUP BY synopsis ORDER BY n DESC LIMIT 5;
 
--- C7 fix: turn '\N' and empty strings into real NULLs (already done, 680 rows)
+-- C7 fix: turn '\N' and empty strings into real NULLs in the drama table (already done, 680 rows)
 UPDATE drama SET synopsis = NULL WHERE synopsis IN ('\N', '') OR synopsis IS NULL;
 
 -- C7 check after the fix
@@ -152,8 +152,8 @@ SELECT tbl, total_rows FROM (
 ) t
 ORDER BY ord;
 
--- C14: add a poster link column to drama
-ALTER TABLE drama ADD COLUMN poster_url TEXT;
+-- C14: add a poster link column to drama (it is also in the CREATE TABLE above, so IF NOT EXISTS keeps this safe)
+ALTER TABLE drama ADD COLUMN IF NOT EXISTS poster_url TEXT;
 -- fill it from the raw table; '\N' and empty text become NULL
 UPDATE drama d
 SET poster_url = NULLIF(NULLIF(r.image_url, ''), '\N')
